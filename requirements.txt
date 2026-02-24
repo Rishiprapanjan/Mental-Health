@@ -1,0 +1,12 @@
+scikit-learn
+pandas
+nltk
+vaderSentiment
+langchain
+groq
+python-dotenv
+gradio
+langchain-groq
+lime
+matplotlib
+ipython
