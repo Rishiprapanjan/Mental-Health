@@ -170,4 +170,4 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-mental_health_model.pkl
+# mental_health_model.pkl (Removed from ignore to allow hosting)
