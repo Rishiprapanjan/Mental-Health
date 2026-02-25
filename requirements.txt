@@ -10,3 +10,4 @@ langchain-groq
 lime
 matplotlib
 ipython
+streamlit

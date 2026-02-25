@@ -1,13 +1,22 @@
+import streamlit as st
 import os
 import pickle
 import pandas as pd
-import gradio as gr
 import numpy as np
 import re
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_groq import ChatGroq
 from lime.lime_text import LimeTextExplainer
+import streamlit.components.v1 as components
+
+# Page configuration
+st.set_page_config(
+    page_title="Mental Health Companion",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Load environment variables
 load_dotenv()
@@ -16,25 +25,75 @@ load_dotenv()
 MODEL_PATH = "mental_health_model.pkl"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
-# GLOBAL VARIABLES for models
-ml_model = None
+# Custom CSS for Premium Look
+st.markdown("""
+<style>
+    .main {
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+        color: #f8fafc;
+    }
+    .stApp {
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+    }
+    [data-testid="stSidebar"] {
+        background-color: rgba(30, 41, 59, 0.7) !important;
+        backdrop-filter: blur(12px);
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .emergency-card {
+        background: rgba(220, 38, 38, 0.2);
+        border-left: 4px solid #ef4444;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        color: #f8fafc;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 8px;
+        background-color: #3b82f6;
+        color: white;
+        transition: all 0.3s;
+    }
+    .stButton>button:hover {
+        background-color: #2563eb;
+        transform: translateY(-2px);
+    }
+    /* Glassmorphism for tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
+        background-color: transparent;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 8px 8px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
 
-def load_models():
-    global ml_model
+# --- LOAD MODEL ---
+@st.cache_resource
+def load_ml_model():
     if os.path.exists(MODEL_PATH):
         try:
             with open(MODEL_PATH, "rb") as f:
-                ml_model = pickle.load(f)
-            print(f"Model loaded successfully from {MODEL_PATH}")
+                model = pickle.load(f)
+            return model
         except Exception as e:
-            print(f"Error loading model: {e}")
-    else:
-        print(f"Warning: {MODEL_PATH} not found. Classification will not work.")
+            st.error(f"Error loading model: {e}")
+    return None
 
-load_models()
+ml_model = load_ml_model()
 
 # --- HELPER FUNCTIONS ---
-
 def predict_status(statement):
     if ml_model:
         try:
@@ -43,7 +102,6 @@ def predict_status(statement):
             return "Unknown"
     return "Unknown (Model missing)"
 
-# LIME predictor must be at top level for multiprocessing pickling on Windows
 def lime_predictor(texts):
     if ml_model:
         probs = ml_model.predict_proba(texts)
@@ -64,7 +122,6 @@ def get_lime_explanation(statement):
         predicted_class = ml_model.predict([statement])[0]
         label_idx = class_names.index(predicted_class)
         
-        # Lower num_samples for speed/stability on Windows
         exp = explainer.explain_instance(
             statement, 
             lime_predictor, 
@@ -74,7 +131,7 @@ def get_lime_explanation(statement):
         )
         return exp.as_html()
     except Exception as e:
-        # Premium Fallback: Keyword Highlighting
+        # Fallback: Keyword Highlighting
         keywords = {
             "Anxiety": ["anxious", "scared", "future", "panic", "worry", "nervous"],
             "Depression": ["depressed", "sad", "hopeless", "crying", "energy", "devastated"],
@@ -91,17 +148,16 @@ def get_lime_explanation(statement):
             highlighted = re.sub(f"({kw})", r"<span style='background-color: #fbbf24; color: black; padding: 2px; border-radius: 4px;'>\1</span>", highlighted, flags=re.IGNORECASE)
         
         fallback_html = f"""
-        <div style='padding: 20px; border-radius: 8px; background: rgba(255,255,255,0.05);'>
+        <div style='padding: 20px; border-radius: 8px; background: rgba(255,255,255,0.05); color: white;'>
             <h4>Visualization Fallback (Predicted: {predicted})</h4>
             <p>We couldn't generate a full LIME report, but here are the key terms in your statement that likely influenced the prediction:</p>
             <p style='font-size: 1.2em; line-height: 1.6;'>{highlighted}</p>
-            <small style='color: #94a3b8'>Note: Full LIME reports may require a local environment with more resources.</small>
+            <small style='color: #94a3b8'>Note: Full LIME reports may require more computational resources.</small>
         </div>
         """
         return fallback_html
 
 def offline_advice(status, message=""):
-    # Check for physical symptoms if the prediction is "Normal"
     physical_keywords = ["cold", "cough", "fever", "pain", "flu", "headache", "sick"]
     if any(kw in message.lower() for kw in physical_keywords):
         return "It sounds like you might be experiencing physical symptoms. I recommend resting, staying hydrated, and consulting a medical doctor or healthcare professional for your physical health."
@@ -117,128 +173,104 @@ def offline_advice(status, message=""):
     }
     return advice.get(status, "I'm here to listen and support you. How can I help further?")
 
-def chat_response(message, history, api_key_input):
-    api_key = api_key_input.strip() if api_key_input else os.getenv("GROQ_API_KEY")
-    status = predict_status(message)
+# --- SIDEBAR ---
+with st.sidebar:
+    st.markdown("## 🏥 Quick Resources")
+    st.markdown("""
+        <div class='emergency-card'>
+            <strong>🚨 Crisis Support</strong><br>
+            988 Suicide & Crisis Lifeline<br>
+            Text 'HOME' to 741741
+        </div>
+    """, unsafe_allow_html=True)
+    
+    api_key_input = st.text_input("Groq API Key (Optional)", type="password", placeholder="gsk_...")
+    st.info("The app will use the pre-configured key if this is left blank.")
+    
+    st.divider()
+    st.markdown("### 💡 Try these examples:")
+    if st.button("I feel so anxious"):
+        st.session_state.example_input = "I feel so anxious"
+    if st.button("I'm overwhelmed with work"):
+        st.session_state.example_input = "I'm overwhelmed with work"
+    if st.button("Everything is hopeless"):
+        st.session_state.example_input = "Everything is hopeless"
 
-    if not api_key or "your_api_key" in api_key:
-        fallback = f"**[Offline Mode - Predicted Status: {status}]**\n\n{offline_advice(status, message)}\n\n*Note: To enable full AI conversation, please add a Groq API Key.*"
-        yield fallback
-        return
+# --- MAIN UI ---
+st.title("🧠 Mental Health Companion")
 
-    try:
-        llm = ChatGroq(api_key=api_key, model_name=GROQ_MODEL, temperature=0.3)
-        messages = [
-            SystemMessage(content=f"""
-                You are an empathetic, professional clinical psychologist assistant.
-                User's predicted mental health status: {status}.
-                Guidelines:
-                1. Provide validating and supportive responses.
-                2. Prioritize safety if self-harm is mentioned.
-                3. If the user mentions physical symptoms like fever, cough, or cold, clarify that you are a mental health assistant and recommend they see a medical doctor.
-            """)
-        ]
-        
-        # Handle Gradio 6 history (list of ChatMessage objects)
-        for msg in history:
-            if hasattr(msg, 'role'):
-                if msg.role == "user":
-                    messages.append(HumanMessage(content=msg.content))
-                elif msg.role == "assistant":
-                    messages.append(AIMessage(content=msg.content))
-            elif isinstance(msg, dict): # Fallback for dict-style history
-                if msg.get("role") == "user":
-                    messages.append(HumanMessage(content=msg.get("content", "")))
-                elif msg.get("role") == "assistant":
-                    messages.append(AIMessage(content=msg.get("content", "")))
-            elif isinstance(msg, (list, tuple)) and len(msg) >= 2: # Fallback for old style list of pairs
-                messages.append(HumanMessage(content=msg[0]))
-                messages.append(AIMessage(content=msg[1]))
+tab1, tab2, tab3 = st.tabs(["💬 Support Chat", "📊 Model Insights", "🌿 Self-Care Hub"])
 
-        messages.append(HumanMessage(content=message))
-        
-        partial_message = ""
-        for chunk in llm.stream(messages):
-            partial_message += chunk.content
-            yield partial_message
-    except Exception as e:
-        yield f"❌ **Error**: {str(e)}\n\n*Falling back to local advice:*\n\n{offline_advice(status, message)}"
+# Support Chat Tab
+with tab1:
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-# --- CUSTOM CSS ---
-custom_css = """
-body { font-family: 'Inter', sans-serif; height: 100vh; margin: 0; }
-.gradio-container {
-    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%) !important;
-    color: #f8fafc !important;
-}
-.glass {
-    background: rgba(30, 41, 59, 0.7) !important;
-    backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-}
-.emergency-card {
-    background: rgba(220, 38, 38, 0.2);
-    border-left: 4px solid #ef4444;
-    padding: 15px; margin-bottom: 15px; border-radius: 8px;
-}
-"""
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-with gr.Blocks() as demo:
-    with gr.Row():
-        # Sidebar
-        with gr.Column(scale=1, elem_id="sidebar", variant="panel"):
-            gr.Markdown("## 🏥 Quick Resources")
-            gr.HTML("""
-                <div class='emergency-card'>
-                    <strong>🚨 Crisis Support</strong><br>
-                    988 Suicide & Crisis Lifeline<br>
-                    Text 'HOME' to 741741
-                </div>
-            """)
-            api_key_box = gr.Textbox(label="Groq API Key", placeholder="gsk_...", type="password")
-            gr.Markdown("---")
-            gr.Markdown("### Try these examples:")
-            ex1 = gr.Button("I feel so anxious", variant="secondary", size="sm")
-            ex2 = gr.Button("I'm overwhelmed with work", variant="secondary", size="sm")
-            ex3 = gr.Button("Everything is hopeless", variant="secondary", size="sm")
+    if prompt := st.chat_input("How are you feeling today?"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-        # Main Content
-        with gr.Column(scale=4):
-            gr.Markdown("# 🧠 Mental Health Companion")
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            full_response = ""
             
-            with gr.Tabs():
-                with gr.TabItem("💬 Support Chat"):
-                    chat_interface = gr.ChatInterface(
-                        fn=chat_response,
-                        chatbot=gr.Chatbot(height=500, label="Your safe space"),
-                        additional_inputs=[api_key_box]
-                    )
-                
-                with gr.TabItem("📊 Model Insights (LIME)"):
-                    gr.Markdown("### Why did the model make this prediction?")
-                    explain_input = gr.Textbox(label="Statement to analyze", placeholder="I've been feeling...")
-                    explain_btn = gr.Button("Analyze Statement", variant="primary")
-                    explain_output = gr.HTML(label="Explanation Output")
+            api_key = api_key_input.strip() if api_key_input else os.getenv("GROQ_API_KEY")
+            status = predict_status(prompt)
+
+            if not api_key or "your_api_key" in api_key:
+                full_response = f"**[Offline Mode - Predicted Status: {status}]**\n\n{offline_advice(status, prompt)}\n\n*Note: To enable full AI conversation, please add a Groq API Key.*"
+                message_placeholder.markdown(full_response)
+            else:
+                try:
+                    llm = ChatGroq(api_key=api_key, model_name=GROQ_MODEL, temperature=0.3)
+                    messages = [
+                        SystemMessage(content=f"You are an empathetic clinical psychologist assistant. User status: {status}. If they mention physical health (fever/cold), advise seeing a doctor.")
+                    ]
+                    for msg in st.session_state.messages:
+                        if msg["role"] == "user":
+                            messages.append(HumanMessage(content=msg["content"]))
+                        else:
+                            messages.append(AIMessage(content=msg["content"]))
                     
-                    explain_btn.click(fn=get_lime_explanation, inputs=explain_input, outputs=explain_output)
+                    for chunk in llm.stream(messages):
+                        full_response += chunk.content
+                        message_placeholder.markdown(full_response + "▌")
+                    message_placeholder.markdown(full_response)
+                except Exception as e:
+                    full_response = f"❌ **Error**: {str(e)}\n\n*Falling back to local advice:*\n\n{offline_advice(status, prompt)}"
+                    message_placeholder.markdown(full_response)
+            
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-                with gr.TabItem("🌿 Self-Care Hub"):
-                    with gr.Row():
-                        with gr.Column():
-                            gr.Markdown("### ✨ Recommended Activities\n- **Journaling**\n- **Nature Walk**\n- **Creative Expression**")
-                        with gr.Column():
-                            gr.Markdown("### 📚 Educational Snippets\n**Anxiety**: The body's natural response to stress.")
+# Model Insights Tab
+with tab2:
+    st.markdown("### Why did the model make this prediction?")
+    
+    # Initialize example input
+    if "example_input" not in st.session_state:
+        st.session_state.example_input = ""
+        
+    explain_input = st.text_input("Statement to analyze", value=st.session_state.example_input, placeholder="I've been feeling...")
+    
+    if st.button("Analyze Statement", key="analyze_btn") or (explain_input and "last_analyzed" not in st.session_state):
+        if explain_input:
+            with st.spinner("Generating explanation..."):
+                explanation_html = get_lime_explanation(explain_input)
+                components.html(explanation_html, height=400, scrolling=True)
+                st.session_state.last_analyzed = explain_input
 
-    # Example interactions
-    def set_example(val): return val
-    ex1.click(lambda: "I feel so anxious", None, explain_input).then(get_lime_explanation, explain_input, explain_output)
-    ex2.click(lambda: "I'm overwhelmed with work stress", None, explain_input).then(get_lime_explanation, explain_input, explain_output)
-    ex3.click(lambda: "Everything feels hopeless and sad", None, explain_input).then(get_lime_explanation, explain_input, explain_output)
-
-if __name__ == "__main__":
-    demo.launch(
-        css=custom_css,
-        show_error=True, 
-        theme=gr.themes.Soft(primary_hue="blue", secondary_hue="slate"),
-        debug=True
-    )
+# Self-Care Hub Tab
+with tab3:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("### ✨ Recommended Activities")
+        st.markdown("- **Journaling**: Write down your thoughts.\n- **Nature Walk**: Get some fresh air.\n- **Creative Expression**: Draw, paint, or listen to music.")
+    with col2:
+        st.markdown("### 📚 Educational Snippets")
+        st.markdown("**Anxiety**: The body's natural response to stress.")
+        st.markdown("**Depression**: A persistent feeling of sadness or loss of interest.")
