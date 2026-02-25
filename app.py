@@ -1,4 +1,12 @@
 import streamlit as st
+import sys
+try:
+    import imghdr
+except ImportError:
+    # Python 3.13 compatibility fix: imghdr was removed from stdlib
+    from types import ModuleType
+    m = ModuleType("imghdr")
+    sys.modules["imghdr"] = m
 import os
 import pickle
 import pandas as pd
