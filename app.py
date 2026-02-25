@@ -195,7 +195,7 @@ with st.sidebar:
     api_key_input = st.text_input("Groq API Key (Optional)", type="password", placeholder="gsk_...")
     st.info("The app will use the pre-configured key if this is left blank.")
     
-    st.divider()
+    st.markdown("---")
     st.markdown("### 💡 Try these examples:")
     if st.button("I feel so anxious"):
         st.session_state.example_input = "I feel so anxious"
@@ -211,28 +211,25 @@ tab1, tab2, tab3 = st.tabs(["💬 Support Chat", "📊 Model Insights", "🌿 Se
 
 # Support Chat Tab
 with tab1:
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # Basic Chat implementation for older Streamlit versions
+    chat_placeholder = st.empty()
+    chat_html = ""
+    for msg in st.session_state.messages:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        chat_html += f"**{role}**: {msg['content']}\n\n"
+    chat_placeholder.markdown(chat_html)
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if prompt := st.chat_input("How are you feeling today?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
+    prompt = st.text_input("How are you feeling today?", key="chat_input")
+    if st.button("Send Message"):
+        if prompt:
+            st.session_state.messages.append({"role": "user", "content": prompt})
             
             api_key = api_key_input.strip() if api_key_input else os.getenv("GROQ_API_KEY")
             status = predict_status(prompt)
 
+            full_response = ""
             if not api_key or "your_api_key" in api_key:
                 full_response = f"**[Offline Mode - Predicted Status: {status}]**\n\n{offline_advice(status, prompt)}\n\n*Note: To enable full AI conversation, please add a Groq API Key.*"
-                message_placeholder.markdown(full_response)
             else:
                 try:
                     llm = ChatGroq(api_key=api_key, model_name=GROQ_MODEL, temperature=0.3)
@@ -245,15 +242,16 @@ with tab1:
                         else:
                             messages.append(AIMessage(content=msg["content"]))
                     
-                    for chunk in llm.stream(messages):
-                        full_response += chunk.content
-                        message_placeholder.markdown(full_response + "▌")
-                    message_placeholder.markdown(full_response)
+                    # Blocking call for simplicity in older versions
+                    response = llm.invoke(messages)
+                    full_response = response.content
                 except Exception as e:
                     full_response = f"❌ **Error**: {str(e)}\n\n*Falling back to local advice:*\n\n{offline_advice(status, prompt)}"
-                    message_placeholder.markdown(full_response)
             
             st.session_state.messages.append({"role": "assistant", "content": full_response})
+            # Re-render chat
+            chat_html += f"**User**: {prompt}\n\n**Assistant**: {full_response}\n\n"
+            chat_placeholder.markdown(chat_html)
 
 # Model Insights Tab
 with tab2:
