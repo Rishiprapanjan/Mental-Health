@@ -212,6 +212,9 @@ tab1, tab2, tab3 = st.tabs(["💬 Support Chat", "📊 Model Insights", "🌿 Se
 # Support Chat Tab
 with tab1:
     # Basic Chat implementation for older Streamlit versions
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+        
     chat_placeholder = st.empty()
     chat_html = ""
     for msg in st.session_state.messages:
